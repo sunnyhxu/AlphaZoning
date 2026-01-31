@@ -60,7 +60,11 @@ def generate_layout(
     grid_size: int,
     min_residential: int = 0,
     min_commercial: int = 0,
+    max_residential: int | None = None,
+    max_commercial: int | None = None,
+    max_buildings: int | None = None,
     num_parks: int = 0,
+    allow_large_buildings: bool = True,
 ) -> None:
     """Generate city layout from user input."""
     st.session_state.error_message = None
@@ -101,6 +105,10 @@ def generate_layout(
         park_positions=park_positions,
         min_residential=min_residential,
         min_commercial=min_commercial,
+        max_residential=max_residential,
+        max_commercial=max_commercial,
+        max_buildings=max_buildings,
+        allow_large_buildings=allow_large_buildings,
         **solver_params,
     )
 
@@ -152,29 +160,73 @@ def main() -> None:
 
         # Building counts
         st.subheader("Building Counts")
-        col_res, col_com = st.columns(2)
-        with col_res:
+        
+        # Total buildings limit
+        max_cells = grid_size * grid_size
+        default_max_buildings = int(max_cells * 0.6)  # 60% coverage default
+        max_buildings = st.slider(
+            "Max Buildings",
+            min_value=1,
+            max_value=max_cells,
+            value=default_max_buildings,
+            help="Maximum total buildings (excluding parks). Controls grid coverage.",
+        )
+        
+        st.caption("Residential")
+        col_res_min, col_res_max = st.columns(2)
+        with col_res_min:
             min_residential = st.number_input(
-                "Residential",
+                "Min",
                 min_value=0,
-                max_value=grid_size * grid_size,
+                max_value=max_buildings,
                 value=5,
                 help="Minimum residential buildings",
+                key="min_res",
             )
-        with col_com:
-            min_commercial = st.number_input(
-                "Commercial",
+        with col_res_max:
+            max_residential = st.number_input(
+                "Max",
                 min_value=0,
-                max_value=grid_size * grid_size,
+                max_value=max_buildings,
+                value=max_buildings,
+                help="Maximum residential buildings",
+                key="max_res",
+            )
+        
+        st.caption("Commercial")
+        col_com_min, col_com_max = st.columns(2)
+        with col_com_min:
+            min_commercial = st.number_input(
+                "Min",
+                min_value=0,
+                max_value=max_buildings,
                 value=3,
                 help="Minimum commercial buildings",
+                key="min_com",
             )
+        with col_com_max:
+            max_commercial = st.number_input(
+                "Max",
+                min_value=0,
+                max_value=max_buildings,
+                value=int(max_buildings * 0.4),  # Default 40% max commercial
+                help="Maximum commercial buildings",
+                key="max_com",
+            )
+        
         num_parks = st.number_input(
             "Parks",
             min_value=0,
             max_value=grid_size * grid_size // 4,
-            value=1,
+            value=2,
             help="Number of parks to place",
+        )
+        
+        # Multi-cell buildings toggle
+        allow_large_buildings = st.checkbox(
+            "Allow large buildings",
+            value=True,
+            help="Allow parks and commercial buildings to span multiple cells",
         )
 
         # Presets
@@ -206,7 +258,11 @@ def main() -> None:
                     grid_size,
                     min_residential=min_residential,
                     min_commercial=min_commercial,
+                    max_residential=max_residential if max_residential < max_buildings else None,
+                    max_commercial=max_commercial if max_commercial < max_buildings else None,
+                    max_buildings=max_buildings,
                     num_parks=num_parks,
+                    allow_large_buildings=allow_large_buildings,
                 )
 
     # Main content

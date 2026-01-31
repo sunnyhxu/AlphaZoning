@@ -1,6 +1,6 @@
 """Tests for Z3 solver."""
 
-from src.models import BuildingType, CityGrid, manhattan_distance
+from src.models import BuildingType, CityGrid, manhattan_distance, building_distance
 from src.z3_solver import solve_city_layout
 
 
@@ -85,6 +85,7 @@ def test_park_proximity() -> None:
         max_total_floors=100,
         park_positions=park_positions,
         park_proximity=max_distance,
+        allow_large_buildings=False,  # Disable for deterministic test
     )
 
     assert result is not None
@@ -95,11 +96,10 @@ def test_park_proximity() -> None:
     assert parks[0].x == 2 and parks[0].y == 2
     assert parks[0].building_type == BuildingType.PARK
 
-    # Verify all non-park buildings are within range of a park
+    # Verify all non-park buildings are within range of any park cell
     for building in result.get_non_parks():
-        min_dist_to_park = min(
-            manhattan_distance(building.x, building.y, p.x, p.y) for p in parks
-        )
+        # Use building_distance to handle multi-cell buildings
+        min_dist_to_park = min(building_distance(building, p) for p in parks)
         assert min_dist_to_park <= max_distance, f"Building at ({building.x},{building.y}) too far from park: {min_dist_to_park}"
 
 
@@ -129,21 +129,20 @@ def test_combined_spacing_and_proximity() -> None:
         park_positions=park_positions,
         min_spacing=2,
         park_proximity=3,
+        allow_large_buildings=False,  # Disable for deterministic test
     )
 
     assert result is not None
 
-    # Verify spacing
+    # Verify spacing using building_distance
     buildings = result.buildings
     for i, b1 in enumerate(buildings):
         for b2 in buildings[i + 1 :]:
-            dist = manhattan_distance(b1.x, b1.y, b2.x, b2.y)
+            dist = building_distance(b1, b2)
             assert dist >= 2
 
     # Verify proximity to park
     parks = result.get_parks()
     for building in result.get_non_parks():
-        min_dist_to_park = min(
-            manhattan_distance(building.x, building.y, p.x, p.y) for p in parks
-        )
+        min_dist_to_park = min(building_distance(building, p) for p in parks)
         assert min_dist_to_park <= 3

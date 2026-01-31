@@ -60,6 +60,8 @@ def visualize_city(grid: CityGrid) -> go.Figure:
                     building.x,
                     building.y,
                     building.height,
+                    building.width,
+                    building.depth,
                     color,
                     building_type.value,
                     show_legend=(building == buildings[0]),
@@ -110,16 +112,18 @@ def _add_building_box(
     x: int,
     y: int,
     height: int,
-    color: str,
-    name: str,
+    width: int = 1,
+    depth: int = 1,
+    color: str = "gray",
+    name: str = "building",
     show_legend: bool = True,
 ) -> None:
     """Add a 3D box representing a building."""
     # Define the 8 vertices of a box
-    # Box is centered at (x+0.5, y+0.5) with size 0.8 to show grid gaps
+    # Box spans from (x, y) to (x + width, y + depth) with small gap
     offset = 0.1
-    x0, x1 = x + offset, x + 1 - offset
-    y0, y1 = y + offset, y + 1 - offset
+    x0, x1 = x + offset, x + width - offset
+    y0, y1 = y + offset, y + depth - offset
     z0, z1 = 0, height
 
     # Vertices
@@ -131,6 +135,9 @@ def _add_building_box(
     i = [0, 0, 4, 4, 0, 0, 1, 1, 0, 0, 3, 3]
     j = [1, 2, 5, 6, 1, 4, 2, 5, 3, 4, 2, 6]
     k = [2, 3, 6, 7, 4, 5, 5, 6, 4, 7, 6, 7]
+
+    # Size info for hover
+    size_str = f"{width}×{depth}" if width > 1 or depth > 1 else "1×1"
 
     fig.add_trace(
         go.Mesh3d(
@@ -148,6 +155,7 @@ def _add_building_box(
             hovertemplate=(
                 f"Type: {name}<br>"
                 f"Position: ({x}, {y})<br>"
+                f"Size: {size_str}<br>"
                 f"Height: {height}<extra></extra>"
             ),
         )

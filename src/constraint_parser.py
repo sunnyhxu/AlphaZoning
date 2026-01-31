@@ -1,4 +1,4 @@
-"""Parse natural language into structured constraints using Gemini."""
+"""Parse natural language into structured constraints using LLM."""
 
 import json
 import logging
@@ -64,19 +64,50 @@ def strip_markdown_fences(text: str) -> str:
     return text
 
 
-def parse_constraints(user_input: str) -> list[Constraint]:
-    """
-    Parse natural language into structured constraints using Gemini.
+def _parse_with_openrouter(user_input: str) -> list[Constraint]:
+    """Parse constraints using OpenRouter API (OpenAI-compatible)."""
+    api_key = os.getenv("OPENROUTER_API_KEY")
+    if not api_key:
+        return []
 
-    Args:
-        user_input: Natural language description of desired city layout.
+    try:
+        from openai import OpenAI
 
-    Returns:
-        List of Constraint objects. Returns empty list on API failure.
-    """
+        client = OpenAI(
+            base_url="https://openrouter.ai/api/v1",
+            api_key=api_key,
+        )
+
+        # Combine system prompt with user input for better JSON mode compliance
+        combined_prompt = f"""{SYSTEM_PROMPT}
+
+IMPORTANT: You MUST only use these exact constraint types: height_limit, density_limit, building_spacing, park_proximity.
+Output format: {{"constraints": [...]}}
+
+Input: {user_input}"""
+
+        response = client.chat.completions.create(
+            model="openai/gpt-4o-mini",
+            messages=[
+                {"role": "user", "content": combined_prompt},
+            ],
+            temperature=0.1,
+            response_format={"type": "json_object"},
+        )
+
+        raw_text = response.choices[0].message.content
+        logger.info(f"OpenRouter response: {raw_text}")
+        return _parse_llm_response(raw_text)
+
+    except Exception as e:
+        logger.warning(f"OpenRouter API error: {e}")
+        return []
+
+
+def _parse_with_gemini(user_input: str) -> list[Constraint]:
+    """Parse constraints using Gemini API."""
     api_key = os.getenv("GEMINI_API_KEY")
     if not api_key:
-        logger.warning("GEMINI_API_KEY not set, returning empty constraints")
         return []
 
     try:
@@ -94,6 +125,16 @@ def parse_constraints(user_input: str) -> list[Constraint]:
         )
 
         raw_text = response.text
+        return _parse_llm_response(raw_text)
+
+    except Exception as e:
+        logger.warning(f"Gemini API error: {e}")
+        return []
+
+
+def _parse_llm_response(raw_text: str) -> list[Constraint]:
+    """Parse LLM response text into Constraint objects."""
+    try:
         clean_text = strip_markdown_fences(raw_text)
 
         # Parse JSON
@@ -121,18 +162,38 @@ def parse_constraints(user_input: str) -> list[Constraint]:
 
         return constraints
 
-    except ImportError:
-        logger.warning("google-generativeai not installed")
-        return []
     except json.JSONDecodeError as e:
-        logger.warning(f"Failed to parse Gemini response as JSON: {e}")
+        logger.warning(f"Failed to parse LLM response as JSON: {e}")
         return []
     except ValidationError as e:
         logger.warning(f"Constraint validation failed: {e}")
         return []
-    except Exception as e:
-        logger.warning(f"Gemini API error: {e}")
-        return []
+
+
+def parse_constraints(user_input: str) -> list[Constraint]:
+    """
+    Parse natural language into structured constraints using LLM.
+
+    Tries Gemini first, falls back to OpenRouter if unavailable.
+
+    Args:
+        user_input: Natural language description of desired city layout.
+
+    Returns:
+        List of Constraint objects. Returns empty list on API failure.
+    """
+    # Try Gemini first
+    constraints = _parse_with_gemini(user_input)
+    if constraints:
+        return constraints
+
+    # Fall back to OpenRouter
+    constraints = _parse_with_openrouter(user_input)
+    if constraints:
+        return constraints
+
+    logger.warning("No LLM API available or all failed, returning empty constraints")
+    return []
 
 
 def load_example_constraints(example_name: str) -> list[Constraint]:

@@ -14,7 +14,9 @@ pip install -r requirements.txt
 
 # Set up environment
 cp .env.example .env
-# Edit .env and add your GEMINI_API_KEY (free at https://ai.google.dev/)
+# Edit .env:
+# GEMINI_API_KEY=...    (Primary)
+# OPENROUTER_API_KEY=... (Fallback)
 
 # Launch web UI
 streamlit run app.py
@@ -24,27 +26,28 @@ streamlit run app.py
 
 The Streamlit app provides:
 - Natural language input for city descriptions
+- **Multi-cell buildings** (parks up to 3x3, commercial up to 2x2)
 - Building count controls (residential, commercial, parks)
 - Grid size configuration
 - Preset city templates (Green, Dense, Family)
-- Interactive 3D visualization
-- Constraint satisfaction reports
+- Interactive 3D visualization with building footprints
+- Constraint satisfaction reports and Z3 verification
 
 ## Architecture
 
 **Pipeline**: Natural Language → Structured Constraints → Valid Layout → Verification → 3D Visualization
 
 ```
-┌─────────────────┐     ┌─────────────────┐     ┌─────────────────┐
-│  User Input     │────▶│  Gemini LLM     │────▶│  Constraints    │
-│  "eco-friendly  │     │  (Parser)       │     │  [JSON]         │
-│   city..."      │     └─────────────────┘     └────────┬────────┘
-└─────────────────┘                                      │
-                                                         ▼
-┌─────────────────┐     ┌─────────────────┐     ┌─────────────────┐
-│  3D Viz         │◀────│  Validator      │◀────│  Z3 SMT Solver  │
-│  (Plotly)       │     │  (Independent)  │     │  (Layout Gen)   │
-└─────────────────┘     └─────────────────┘     └─────────────────┘
+┌─────────────────┐     ┌────────────────────────────┐     ┌─────────────────┐
+│  User Input     │────▶│  Gemini / OpenRouter LLM   │────▶│  Constraints    │
+│  "eco-friendly  │     │  (Parser + Fallback)       │     │  [JSON]         │
+│   city..."      │     └────────────────────────────┘     └────────┬────────┘
+                                                                    │
+                                                                    ▼
+┌─────────────────┐     ┌────────────────────────────┐     ┌─────────────────┐
+│  3D Viz         │◀────│  Validator                 │◀────│  Z3 SMT Solver  │
+│  (Plotly)       │     │  (Independent)             │     │  (Layout Gen)   │
+└─────────────────┘     └────────────────────────────┘     └─────────────────┘
 ```
 
 ### Components
