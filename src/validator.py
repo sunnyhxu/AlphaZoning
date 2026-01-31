@@ -40,6 +40,56 @@ def validate_solution(
     }
 
 
+def count_satisfied_buildings(grid: CityGrid, constraints: list[Constraint]) -> tuple[int, int]:
+    """
+    Count buildings that satisfy all constraints.
+    
+    Returns:
+        Tuple of (satisfied_building_count, total_building_count)
+    """
+    if not grid.buildings:
+        return 0, 0
+    
+    # For each building, check if it violates any constraint
+    buildings_with_violations: set[tuple[int, int]] = set()
+    
+    for constraint in constraints:
+        if constraint.type == "height_limit":
+            max_floors = constraint.params.get("max_floors", float("inf"))
+            for b in grid.buildings:
+                if b.height > max_floors:
+                    buildings_with_violations.add((b.x, b.y))
+        
+        elif constraint.type == "park_proximity":
+            max_distance = constraint.params.get("max_distance", float("inf"))
+            parks = grid.get_parks()
+            if parks:
+                for b in grid.get_non_parks():
+                    min_dist = min(
+                        abs(b.x - p.x) + abs(b.y - p.y) 
+                        for p in parks
+                        for px, py in [(p.x + dx, p.y + dy) for dx in range(p.width) for dy in range(p.depth)]
+                    ) if parks else float("inf")
+                    # Simpler: use anchor-to-anchor for speed
+                    min_dist = min(abs(b.x - p.x) + abs(b.y - p.y) for p in parks)
+                    if min_dist > max_distance:
+                        buildings_with_violations.add((b.x, b.y))
+        
+        elif constraint.type == "building_spacing":
+            min_distance = constraint.params.get("min_distance", 0)
+            buildings = grid.buildings
+            for i, b1 in enumerate(buildings):
+                for b2 in buildings[i + 1:]:
+                    dist = abs(b1.x - b2.x) + abs(b1.y - b2.y)
+                    if dist < min_distance:
+                        buildings_with_violations.add((b1.x, b1.y))
+                        buildings_with_violations.add((b2.x, b2.y))
+    
+    total = len(grid.buildings)
+    satisfied = total - len(buildings_with_violations)
+    return satisfied, total
+
+
 def _validate_constraint(grid: CityGrid, constraint: Constraint) -> list[str]:
     """Validate a single constraint, returning list of violation messages."""
     validators = {

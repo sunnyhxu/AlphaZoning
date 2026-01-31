@@ -91,6 +91,12 @@ def solve_city_layout(
         placed_parks.append(park)
         occupied_cells.update(new_cells)
 
+    # Build park membership map: cell -> park_index (for spacing constraint)
+    park_membership: dict[tuple[int, int], int] = {}
+    for i, park in enumerate(placed_parks):
+        for cell in park.footprint():
+            park_membership[cell] = i
+
     # Declare height variables for each cell
     heights: list[list[z3.ArithRef]] = [
         [z3.Int(f"h_{x}_{y}") for y in range(grid_size)] for x in range(grid_size)
@@ -132,13 +138,19 @@ def solve_city_layout(
     solver.add(z3.Sum(all_heights) <= max_total_floors)
 
     # Constraint: building spacing (Manhattan distance)
-    # Applies to ALL building types including parks
+    # Skip spacing check for cells belonging to the same multi-cell building (park)
     if min_spacing is not None and min_spacing > 1:
         for x1 in range(grid_size):
             for y1 in range(grid_size):
                 for x2 in range(grid_size):
                     for y2 in range(grid_size):
                         if (x1, y1) < (x2, y2):  # Avoid duplicate pairs
+                            # Skip if both cells belong to the same park
+                            p1 = park_membership.get((x1, y1))
+                            p2 = park_membership.get((x2, y2))
+                            if p1 is not None and p1 == p2:
+                                continue  # Same park, no spacing needed
+                            
                             dist = abs(x1 - x2) + abs(y1 - y2)
                             if dist < min_spacing:
                                 both_are_buildings = z3.And(

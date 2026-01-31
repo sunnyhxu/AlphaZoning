@@ -1,6 +1,7 @@
 """AlphaZoning - Streamlit Web Interface."""
 
 import json
+import random
 
 from dotenv import load_dotenv
 import streamlit as st
@@ -9,12 +10,15 @@ import streamlit as st
 load_dotenv()
 
 from src import (
+    Building,
     BuildingType,
+    CityGrid,
     Constraint,
     load_example_constraints,
     parse_constraints,
     solve_layout,
     validate_solution,
+    count_satisfied_buildings,
     visualize_city,
 )
 
@@ -53,6 +57,182 @@ def constraints_to_solver_params(constraints: list[Constraint]) -> dict:
         elif c.type == "park_proximity":
             params["park_proximity"] = c.params.get("max_distance")
     return params
+
+
+def generate_greedy_layout(
+    grid_size: int,
+    num_buildings: int,
+    num_parks: int,
+    max_height: int = 10,
+    residential_ratio: float = 0.6,
+    allow_large_buildings: bool = True,
+    park_proximity: int | None = None,
+    min_spacing: int | None = None,
+) -> CityGrid:
+    """
+    Generate a city layout using greedy constraint-aware placement.
+    
+    Strategy:
+    1. Place parks to maximize grid coverage (spread evenly)
+    2. Place buildings greedily, prioritizing positions that:
+       - Are within park_proximity of a park
+       - Respect min_spacing from other buildings
+    """
+    buildings: list[Building] = []
+    occupied: set[tuple[int, int]] = set()
+    
+    # Park size options
+    park_sizes = [(2, 2), (2, 3), (3, 2), (3, 3), (1, 2), (2, 1)] if allow_large_buildings else [(1, 1)]
+    commercial_sizes = [(1, 1), (1, 2), (2, 1), (2, 2)] if allow_large_buildings else [(1, 1)]
+    
+    # --- STEP 1: Place parks strategically to maximize coverage ---
+    # Use a grid-based placement to spread parks evenly
+    if num_parks > 0:
+        # Calculate optimal park positions for coverage
+        parks_per_side = max(1, int(num_parks ** 0.5))
+        step = grid_size // (parks_per_side + 1)
+        
+        park_positions = []
+        for i in range(parks_per_side):
+            for j in range(parks_per_side):
+                if len(park_positions) < num_parks:
+                    px = step * (i + 1)
+                    py = step * (j + 1)
+                    park_positions.append((px, py))
+        
+        # Add remaining parks at strategic positions
+        while len(park_positions) < num_parks:
+            # Find position furthest from existing parks
+            best_pos = None
+            best_min_dist = -1
+            for x in range(grid_size):
+                for y in range(grid_size):
+                    if park_positions:
+                        min_dist = min(abs(x - px) + abs(y - py) for px, py in park_positions)
+                    else:
+                        min_dist = grid_size * 2
+                    if min_dist > best_min_dist:
+                        best_min_dist = min_dist
+                        best_pos = (x, y)
+            if best_pos:
+                park_positions.append(best_pos)
+        
+        # Place parks at calculated positions
+        for px, py in park_positions:
+            # Try different sizes, prefer larger
+            placed = False
+            for w, d in park_sizes:
+                if px + w <= grid_size and py + d <= grid_size:
+                    cells = [(px + dx, py + dy) for dx in range(w) for dy in range(d)]
+                    if all(c not in occupied for c in cells):
+                        buildings.append(Building(x=px, y=py, height=1, width=w, depth=d, building_type=BuildingType.PARK))
+                        occupied.update(cells)
+                        placed = True
+                        break
+            # Fallback to 1x1
+            if not placed and (px, py) not in occupied:
+                buildings.append(Building(x=px, y=py, height=1, width=1, depth=1, building_type=BuildingType.PARK))
+                occupied.add((px, py))
+    
+    # Get park footprints for proximity calculation
+    park_cells = set()
+    for b in buildings:
+        if b.building_type == BuildingType.PARK:
+            for dx in range(b.width):
+                for dy in range(b.depth):
+                    park_cells.add((b.x + dx, b.y + dy))
+    
+    # --- STEP 2: Greedy building placement ---
+    def get_min_park_distance(x: int, y: int) -> int:
+        """Get Manhattan distance to nearest park cell."""
+        if not park_cells:
+            return 0
+        return min(abs(x - px) + abs(y - py) for px, py in park_cells)
+    
+    def get_min_building_distance(x: int, y: int, w: int, d: int) -> int:
+        """Get minimum distance to any existing non-park building."""
+        min_dist = float('inf')
+        cells = [(x + dx, y + dy) for dx in range(w) for dy in range(d)]
+        for b in buildings:
+            if b.building_type == BuildingType.PARK:
+                continue
+            for bx, by in b.footprint():
+                for cx, cy in cells:
+                    dist = abs(cx - bx) + abs(cy - by)
+                    min_dist = min(min_dist, dist)
+        return min_dist if min_dist != float('inf') else grid_size * 2
+    
+    def score_position(x: int, y: int, w: int, d: int) -> float:
+        """Score a position based on constraint satisfaction."""
+        score = 0.0
+        
+        # Prefer positions close to parks (if park_proximity constraint)
+        park_dist = get_min_park_distance(x, y)
+        if park_proximity is not None:
+            if park_dist <= park_proximity:
+                score += 100  # Big bonus for satisfying proximity
+            else:
+                score -= (park_dist - park_proximity) * 10  # Penalty for violation
+        else:
+            score += 50 - park_dist  # Mild preference for park proximity
+        
+        # Respect spacing constraint
+        building_dist = get_min_building_distance(x, y, w, d)
+        if min_spacing is not None:
+            if building_dist >= min_spacing:
+                score += 50  # Bonus for satisfying spacing
+            else:
+                score -= (min_spacing - building_dist) * 20  # Penalty for violation
+        
+        # Add small random factor to break ties
+        score += random.random() * 5
+        
+        return score
+    
+    # Place buildings
+    residential_count = int(num_buildings * residential_ratio)
+    
+    for i in range(num_buildings):
+        if i < residential_count:
+            b_type = BuildingType.RESIDENTIAL
+            sizes = [(1, 1)]
+            height = random.randint(1, min(5, max_height))
+        else:
+            b_type = BuildingType.COMMERCIAL
+            sizes = commercial_sizes
+            height = random.randint(3, max_height)
+        
+        # Find best position using greedy scoring
+        best_pos = None
+        best_score = float('-inf')
+        best_size = (1, 1)
+        
+        # Sample candidate positions (full search too slow)
+        candidates = []
+        for _ in range(50):
+            for w, d in sizes:
+                if grid_size - w >= 0 and grid_size - d >= 0:
+                    x = random.randint(0, grid_size - w)
+                    y = random.randint(0, grid_size - d)
+                    candidates.append((x, y, w, d))
+        
+        for x, y, w, d in candidates:
+            cells = [(x + dx, y + dy) for dx in range(w) for dy in range(d)]
+            if all(c not in occupied for c in cells):
+                score = score_position(x, y, w, d)
+                if score > best_score:
+                    best_score = score
+                    best_pos = (x, y)
+                    best_size = (w, d)
+        
+        if best_pos:
+            x, y = best_pos
+            w, d = best_size
+            cells = [(x + dx, y + dy) for dx in range(w) for dy in range(d)]
+            buildings.append(Building(x=x, y=y, height=height, width=w, depth=d, building_type=b_type))
+            occupied.update(cells)
+    
+    return CityGrid(size=grid_size, buildings=buildings)
 
 
 def generate_layout(
@@ -99,7 +279,7 @@ def generate_layout(
                 if px < grid_size and py < grid_size:
                     park_positions.append((px, py))
 
-    # Solve
+    # Solve with Z3
     grid = solve_layout(
         grid_size=grid_size,
         park_positions=park_positions,
@@ -119,11 +299,49 @@ def generate_layout(
         )
         return
 
+    # Check satisfaction rate (per-building)
+    constraints = st.session_state.constraints
+    if constraints:
+        satisfied, total = count_satisfied_buildings(grid, constraints)
+        satisfaction_rate = satisfied / total if total > 0 else 1.0
+        
+        # Fallback: if satisfaction < 90%, try random sampling
+        if satisfaction_rate < 0.9:
+            best_grid = grid
+            best_satisfaction = satisfaction_rate
+            
+            max_height = solver_params.get("max_height", 10)
+            num_buildings_target = max_buildings if max_buildings else int(grid_size * grid_size * 0.5)
+            
+            for _ in range(100):  # Fewer iterations since greedy is smarter
+                greedy_grid = generate_greedy_layout(
+                    grid_size=grid_size,
+                    num_buildings=num_buildings_target,
+                    num_parks=num_parks,
+                    max_height=max_height,
+                    park_proximity=solver_params.get("park_proximity"),
+                    min_spacing=solver_params.get("min_spacing"),
+                )
+                sat, tot = count_satisfied_buildings(greedy_grid, constraints)
+                rate = sat / tot if tot > 0 else 0
+                if rate > best_satisfaction:
+                    best_grid = greedy_grid
+                    best_satisfaction = rate
+                    if rate >= 0.95:  # Early exit if good enough
+                        break
+            
+            grid = best_grid
+
     st.session_state.grid = grid
 
-    # Validate
+    # Validate and compute per-building satisfaction
     if st.session_state.constraints:
         is_valid, report = validate_solution(grid, st.session_state.constraints)
+        # Override satisfaction_rate with per-building calculation
+        satisfied, total = count_satisfied_buildings(grid, st.session_state.constraints)
+        report["satisfaction_rate"] = satisfied / total if total > 0 else 1.0
+        report["satisfied_buildings"] = satisfied
+        report["total_buildings"] = total
         st.session_state.validation_report = report
 
 
