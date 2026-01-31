@@ -1,0 +1,22 @@
+{
+  "name": "Green City",
+  "description": "Eco-friendly city with abundant parks and low-rise buildings",
+  "constraints": [
+    {
+      "type": "height_limit",
+      "params": {"max_floors": 5}
+    },
+    {
+      "type": "park_proximity",
+      "params": {"max_distance": 2}
+    },
+    {
+      "type": "building_spacing",
+      "params": {"min_distance": 2}
+    },
+    {
+      "type": "density_limit",
+      "params": {"max_total_floors": 50}
+    }
+  ]
+}

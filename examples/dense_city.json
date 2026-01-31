@@ -1,0 +1,18 @@
+{
+  "name": "Dense City",
+  "description": "High-density urban downtown with tall buildings close together",
+  "constraints": [
+    {
+      "type": "height_limit",
+      "params": {"max_floors": 20}
+    },
+    {
+      "type": "density_limit",
+      "params": {"max_total_floors": 200}
+    },
+    {
+      "type": "building_spacing",
+      "params": {"min_distance": 1}
+    }
+  ]
+}
