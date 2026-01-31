@@ -1,0 +1,22 @@
+{
+  "name": "Family City",
+  "description": "Balanced family-friendly neighborhood with moderate density",
+  "constraints": [
+    {
+      "type": "height_limit",
+      "params": {"max_floors": 8}
+    },
+    {
+      "type": "park_proximity",
+      "params": {"max_distance": 3}
+    },
+    {
+      "type": "building_spacing",
+      "params": {"min_distance": 2}
+    },
+    {
+      "type": "density_limit",
+      "params": {"max_total_floors": 80}
+    }
+  ]
+}

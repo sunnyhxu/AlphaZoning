@@ -1,145 +1,97 @@
 # CLAUDE.md
 
+This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
+
 ## Overview
 
-**AlphaZoning** is a neuro-symbolic urban design system that generates city layouts with mathematical proof of constraint satisfaction.
+**AlphaZoning** generates city layouts from natural language with Z3-verified constraint satisfaction.
 
-**Pipeline**: Natural Language → Structured Constraints (Gemini) → Valid Layout (Z3 SMT) → Proof Certificate → 3D Visualization (Plotly/Streamlit)
+**Pipeline**: NL → Constraints (Gemini) → Layout (Z3 SMT) → Validation → 3D Viz (Plotly)
 
 **Target**: Hack@Brown 2026
-
-## Project Structure
-
-```
-alphazoning/
-├── src/
-│   ├── models.py              # Building, Constraint, CityGrid
-│   ├── constraint_parser.py   # NL→JSON via Gemini
-│   ├── z3_solver.py           # Z3 constraint encoding
-│   ├── validator.py           # Independent verification
-│   └── visualizer.py          # Plotly 3D rendering
-├── app.py                     # Streamlit UI
-├── tests/                     # pytest suite
-└── examples/                  # Pre-configured scenarios
-```
 
 ## Commands
 
 ```bash
-# Setup
-python -m venv venv && source venv/bin/activate
-pip install -r requirements.txt
-
-# Run
-streamlit run app.py
-
-# Test & Lint
-pytest tests/ -v
-mypy src/
-ruff check src/
+pip install -r requirements.txt    # Install dependencies
+streamlit run app.py               # Launch web UI
+pytest tests/ -v                   # Run tests
+python -c "from src import *"      # Verify imports
 ```
 
-## Tech Stack
+## Project Structure
 
-Python 3.12+ · z3-solver · google-generativeai · streamlit · plotly · pydantic
+```
+src/
+├── __init__.py           # Public API exports
+├── models.py             # Building, BuildingType, Constraint, CityGrid
+├── z3_solver.py          # solve_layout() - Z3 constraint encoding
+├── constraint_parser.py  # parse_constraints() - Gemini NL→JSON
+├── validator.py          # validate_solution() - Independent verification
+└── visualizer.py         # visualize_city() - Plotly 3D rendering
 
-## Code Style
+app.py                    # Streamlit web interface
+tests/                    # pytest suite
+examples/                 # Preset constraint files (green_city, dense_city, family_city)
+```
 
-- Type hints everywhere (mypy enforced)
-- Google-style docstrings
-- 100 char line limit
-- Use dataclasses, not raw dicts
+## Public API
+
+```python
+from src import (
+    solve_layout,           # Generate layout with Z3
+    parse_constraints,      # NL → Constraint list via Gemini
+    load_example_constraints,  # Load from examples/
+    validate_solution,      # Verify constraints independently
+    visualize_city,         # Create Plotly 3D figure
+    Building, BuildingType, Constraint, CityGrid,
+)
+```
+
+## Constraint Types
+
+| Type | Param | Description |
+|------|-------|-------------|
+| `height_limit` | `max_floors` | Max height per building |
+| `density_limit` | `max_total_floors` | Max sum of all heights |
+| `building_spacing` | `min_distance` | Min Manhattan distance between buildings |
+| `park_proximity` | `max_distance` | Max distance to nearest park |
+
+## Solver Parameters
+
+| Param | Description |
+|-------|-------------|
+| `min_residential` | Minimum residential buildings to place |
+| `min_commercial` | Minimum commercial buildings to place |
+| `park_positions` | List of (x, y) park coordinates |
 
 ## Z3 Patterns
 
-**Declare variables upfront, then add constraints:**
+Use `z3.Solver()` for speed (default). Use `z3.Optimize()` only when maximizing density.
 
 ```python
-solver = z3.Optimize()
-heights = [[z3.Int(f'h_{x}_{y}') for y in range(SIZE)] for x in range(SIZE)]
+# Building count constraint
+solver.add(z3.Sum([z3.If(heights[x][y] > 0, 1, 0) for ...]) >= min_buildings)
 
-for x, y in product(range(SIZE), repeat=2):
-    solver.add(And(heights[x][y] >= 0, heights[x][y] <= 20))
+# Spacing constraint: at most one building per pair within min_distance
+if dist < min_spacing:
+    solver.add(Or(heights[x1][y1] == 0, heights[x2][y2] == 0))
 ```
 
-**Distance**: Use Manhattan (`|x1-x2| + |y1-y2|`) — Euclidean causes timeouts.
-
-**Optimization**: Use `z3.Optimize()` with soft constraints for nice-to-haves.
-
-### Constraint Encoding Reference
-
-| Type | Pattern |
-|------|---------|
-| Park proximity | `Or([dist(b, p) <= D for p in parks])` |
-| Building spacing | `dist(b1, b2) >= D` for all pairs |
-| Sunlight | `If(heights[x][y-1] > 10, heights[x][y] == 0, True)` |
-| Density | `Sum(heights) <= threshold` |
-| Height limit | `heights[x][y] <= max_height` |
-
-## Error Handling
-
-```python
-result = solver.check()
-if result == z3.sat:
-    model = solver.model()
-elif result == z3.unsat:
-    raise ImpossibleConstraintsError("Try: relax density or increase grid")
-elif result == z3.unknown:
-    raise SolverTimeoutError("Try: simpler constraints or smaller grid")
-```
-
-**LLM failures**: Validate with Pydantic, fallback to `examples/` if API fails.
-
-## Performance
-
-- Grid size ≤10×10 for demos (100 variables)
-- Timeout: `solver.set('timeout', 30000)`
-- Cache LLM responses: `@st.cache_data`
-- Reuse solver: `@st.cache_resource`
-
-## Common Pitfalls
-
-| Issue | Solution |
-|-------|----------|
-| Z3 variables losing scope | Declare all in list/matrix upfront |
-| Non-linear constraints timeout | Use Manhattan distance or dist² |
-| LLM returns markdown-wrapped JSON | Strip ` ```json ` fences before parsing |
-| Streamlit reruns everything | Use `st.session_state` and caching |
+Manhattan distance only—Euclidean causes timeouts.
 
 ## Environment
 
 ```bash
 # .env (not committed)
-GEMINI_API_KEY=your_key
-Z3_TIMEOUT_MS=30000
-GRID_SIZE=10
+GEMINI_API_KEY=your_key   # Free at https://ai.google.dev/
 ```
 
-**Gemini API**: Free key at https://ai.google.dev/ (60 req/min)
+## Status
 
-## Debugging
-
-**Z3 stuck?**
-1. Print assertions: `print(solver.assertions())`
-2. Try 5×5 grid
-3. Add constraints incrementally to find conflict
-
-**Gemini errors?**
-1. Verify `$GEMINI_API_KEY`
-2. Use `response_mime_type: "application/json"`
-3. Add exponential backoff
-
-## Development Priority
-
-1. **Foundation**: `models.py` + `z3_solver.py` with 2-3 constraints
-2. **Integration**: LLM parsing + validation, end-to-end tests
-3. **Polish**: Streamlit UI + Plotly visualization
-4. **Demo Prep**: Error handling, fallbacks, practice
-
-## Success Criteria
-
-| Level | Requirements |
-|-------|--------------|
-| **MVP** | 3 constraint types, valid layout, visualization, satisfaction report |
-| **Competitive** | 5-7 constraints, 3D Plotly, Gemini integration, polished UI |
-| **Prize-winning** | Formal proof certificate, comparative layouts, graceful impossible-constraint handling |
+**Complete**:
+- Core solver with 4 constraint types + building count minimums
+- Gemini parser (gemini-2.0-flash) with pydantic validation
+- Independent validator with detailed reports
+- 3D Plotly visualization with building type colors
+- Streamlit web UI with building count inputs

@@ -16,9 +16,19 @@ pip install -r requirements.txt
 cp .env.example .env
 # Edit .env and add your GEMINI_API_KEY (free at https://ai.google.dev/)
 
-# Run tests
-pytest tests/ -v
+# Launch web UI
+streamlit run app.py
 ```
+
+## Web Interface
+
+The Streamlit app provides:
+- Natural language input for city descriptions
+- Building count controls (residential, commercial, parks)
+- Grid size configuration
+- Preset city templates (Green, Dense, Family)
+- Interactive 3D visualization
+- Constraint satisfaction reports
 
 ## Architecture
 
@@ -41,6 +51,7 @@ pytest tests/ -v
 
 | Module | Purpose |
 |--------|---------|
+| `app.py` | Streamlit web interface |
 | `constraint_parser.py` | NL → JSON via Gemini API |
 | `z3_solver.py` | SMT-based layout generation |
 | `validator.py` | Independent constraint verification |
@@ -53,30 +64,32 @@ pytest tests/ -v
 - **building_spacing**: Minimum Manhattan distance between buildings
 - **park_proximity**: Maximum distance from any building to nearest park
 
+### Building Types
+
+- **Residential** (blue): Housing units
+- **Commercial** (orange): Business buildings
+- **Parks** (green): Green spaces
+
 ## Examples
 
 Pre-configured constraint sets in `examples/`:
 
-```bash
-# Load example constraints
-python -c "from src import load_example_constraints; print(load_example_constraints('green_city'))"
-```
-
 - `green_city.json` - Eco-friendly: low-rise, parks everywhere
 - `dense_city.json` - Urban downtown: tall buildings, high density
+- `family_city.json` - Family-friendly: balanced with parks
 
-## Usage
+## Usage (Python API)
 
 ```python
 from src import solve_layout, validate_solution, visualize_city
 
-# Generate layout
+# Generate layout with building minimums
 grid = solve_layout(
-    grid_size=5,
+    grid_size=10,
     max_height=10,
-    park_positions=[(2, 2)],
-    min_spacing=2,
-    park_proximity=3,
+    park_positions=[(5, 5)],
+    min_residential=5,
+    min_commercial=3,
 )
 
 # Validate
@@ -89,7 +102,7 @@ fig.show()
 
 ## Tech Stack
 
-Python 3.12+ · z3-solver · google-generativeai · plotly · pydantic
+Python 3.12+ · z3-solver · google-generativeai · streamlit · plotly · pydantic
 
 ## License
 
